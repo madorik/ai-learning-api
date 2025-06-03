@@ -28,13 +28,9 @@ router.get('/google/callback',
     try {
       // JWT 토큰 생성
       const token = generateToken(req.user);
-      
-      // 성공 시 클라이언트로 리다이렉트 (토큰을 쿼리 파라미터로 전달)
-      // 프론트엔드가 9090 포트에서 실행됨
-      const redirectUrl = process.env.NODE_ENV === 'production'
-        ? `https://yourdomain.com/auth/success?token=${token}`
-        : `http://localhost:9090/auth/success?token=${token}`;
-      
+      const frontUrl = process.env.FRONTEND_URL || 'http://localhost:9090';
+      const redirectUrl = `${frontUrl}/auth/success?token=${token}`;
+
       res.redirect(redirectUrl);
       
     } catch (error) {
