@@ -1,0 +1,36 @@
+# AI Learning API 환경 변수 설정
+
+# 서버 설정
+NODE_ENV=development
+PORT=3000
+
+# Google OAuth 2.0 설정
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+
+# JWT 설정
+JWT_SECRET=your-very-secure-jwt-secret-key-here
+
+# OpenAI API 설정
+OPENAI_API_KEY=your-openai-api-key
+
+# Supabase 설정
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+
+# 세션 설정
+SESSION_SECRET=your-secure-session-secret
+
+# CORS 설정 (프론트엔드 URL)
+FRONTEND_URL=http://localhost:9090
+
+# 설정 가이드:
+# 1. Google OAuth: https://console.developers.google.com 에서 생성
+# 2. JWT_SECRET: 최소 32자의 랜덤 문자열 권장
+# 3. OpenAI API: https://platform.openai.com/api-keys 에서 생성
+# 4. Supabase: https://supabase.com 프로젝트에서 API 키 확인
+#    - SUPABASE_URL: 프로젝트 설정 > API > Project URL
+#    - SUPABASE_ANON_KEY: 프로젝트 설정 > API > anon public
+ 
