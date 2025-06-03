@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Learning API 클라이언트</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .section {
+      margin-bottom: 30px;
+      padding: 20px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+    }
+    
+    .section h2 {
+      margin-top: 0;
+      color: #555;
+    }
+    
+    .form-group {
+      margin-bottom: 15px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+      color: #333;
+    }
+    
+    input, textarea, button {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+    
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background-color 0.2s;
+    }
+    
+    button:hover {
+      background-color: #0056b3;
+    }
+    
+    button:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+    }
+    
+    .oauth-button {
+      background-color: #4285f4;
+      margin-bottom: 10px;
+    }
+    
+    .oauth-button:hover {
+      background-color: #357ae8;
+    }
+    
+    .response {
+      margin-top: 15px;
+      padding: 15px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    
+    .response.success {
+      background-color: #d4edda;
+      border: 1px solid #c3e6cb;
+      color: #155724;
+    }
+    
+    .response.error {
+      background-color: #f8d7da;
+      border: 1px solid #f5c6cb;
+      color: #721c24;
+    }
+    
+    .loading {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #007bff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .user-info {
+      background-color: #e7f3ff;
+      padding: 15px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 AI Learning API 클라이언트</h1>
+    
+    <!-- 로그인 상태 표시 -->
+    <div id="userInfo" class="user-info" style="display: none;">
+      <strong>로그인됨:</strong> <span id="userEmail"></span>
+      <button id="logoutBtn" style="width: auto; margin-left: 10px; padding: 5px 15px;">로그아웃</button>
+    </div>
+    
+    <!-- Google OAuth 로그인 -->
+    <div class="section">
+      <h2>🔐 Google OAuth 로그인</h2>
+      <button id="googleLoginBtn" class="oauth-button">Google로 로그인</button>
+      <button id="checkAuthBtn">로그인 상태 확인</button>
+      <div id="authResponse" class="response" style="display: none;"></div>
+    </div>
+    
+    <!-- 단일 질문 -->
+    <div class="section">
+      <h2>❓ ChatGPT에 질문하기</h2>
+      <div class="form-group">
+        <label for="questionInput">질문을 입력하세요:</label>
+        <textarea id="questionInput" placeholder="예: Node.js에서 비동기 처리 방법을 알려주세요."></textarea>
+      </div>
+      <button id="askBtn">질문하기</button>
+      <div id="askResponse" class="response" style="display: none;"></div>
+    </div>
+    
+    <!-- 대화형 채팅 -->
+    <div class="section">
+      <h2>💬 대화형 채팅</h2>
+      <div class="form-group">
+        <label for="chatInput">메시지를 입력하세요:</label>
+        <textarea id="chatInput" placeholder="안녕하세요! AI와 대화해보세요."></textarea>
+      </div>
+      <button id="chatBtn">메시지 보내기</button>
+      <button id="clearChatBtn" style="background-color: #6c757d; margin-top: 10px;">대화 기록 초기화</button>
+      <div id="chatHistory" style="margin-top: 15px;"></div>
+    </div>
+    
+    <!-- API 상태 확인 -->
+    <div class="section">
+      <h2>📊 API 상태</h2>
+      <button id="healthBtn">OpenAI API 상태 확인</button>
+      <button id="modelsBtn" style="margin-top: 10px;">모델 정보 조회</button>
+      <div id="statusResponse" class="response" style="display: none;"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE_URL = 'http://localhost:3000';
+    let chatMessages = [];
+    let authToken = localStorage.getItem('authToken');
+    
+    // 페이지 로드 시 로그인 상태 확인
+    window.addEventListener('load', () => {
+      checkAuthStatus();
+      
+      // URL에서 토큰 추출 (OAuth 콜백에서 온 경우)
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token');
+      if (token) {
+        authToken = token;
+        localStorage.setItem('authToken', token);
+        checkAuthStatus();
+        // URL에서 토큰 제거
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    });
+    
+    // API 요청 헬퍼 함수
+    async function apiRequest(endpoint, options = {}) {
+      try {
+        const headers = {
+          'Content-Type': 'application/json',
+          ...options.headers
+        };
+        
+        if (authToken) {
+          headers['Authorization'] = `Bearer ${authToken}`;
+        }
+        
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          ...options,
+          headers
+        });
+        
+        const data = await response.json();
+        return { status: response.status, data };
+      } catch (error) {
+        return { status: 500, error: error.message };
+      }
+    }
+    
+    // 응답 표시 함수
+    function showResponse(elementId, result, isSuccess = true) {
+      const element = document.getElementById(elementId);
+      element.style.display = 'block';
+      element.className = `response ${isSuccess ? 'success' : 'error'}`;
+      element.textContent = JSON.stringify(result, null, 2);
+    }
+    
+    // 로딩 상태 설정
+    function setLoading(buttonId, isLoading) {
+      const button = document.getElementById(buttonId);
+      if (isLoading) {
+        button.disabled = true;
+        button.innerHTML = '<span class="loading"></span>처리 중...';
+      } else {
+        button.disabled = false;
+        button.innerHTML = button.getAttribute('data-original-text') || button.textContent.replace('처리 중...', '').replace('⟳', '');
+      }
+    }
+    
+    // 로그인 상태 확인
+    async function checkAuthStatus() {
+      if (!authToken) return;
+      
+      const result = await apiRequest('/auth/verify-token', { method: 'POST' });
+      
+      if (result.status === 200) {
+        document.getElementById('userInfo').style.display = 'block';
+        document.getElementById('userEmail').textContent = result.data.user.email;
+      } else {
+        // 토큰이 무효한 경우 제거
+        authToken = null;
+        localStorage.removeItem('authToken');
+        document.getElementById('userInfo').style.display = 'none';
+      }
+    }
+    
+    // 이벤트 리스너 등록
+    document.getElementById('googleLoginBtn').addEventListener('click', () => {
+      window.location.href = `${API_BASE_URL}/auth/google`;
+    });
+    
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await apiRequest('/auth/logout', { method: 'POST' });
+      authToken = null;
+      localStorage.removeItem('authToken');
+      document.getElementById('userInfo').style.display = 'none';
+      alert('로그아웃되었습니다.');
+    });
+    
+    document.getElementById('checkAuthBtn').addEventListener('click', async () => {
+      setLoading('checkAuthBtn', true);
+      const result = await apiRequest('/auth/status');
+      setLoading('checkAuthBtn', false);
+      showResponse('authResponse', result.data, result.status === 200);
+    });
+    
+    document.getElementById('askBtn').addEventListener('click', async () => {
+      const question = document.getElementById('questionInput').value.trim();
+      if (!question) {
+        alert('질문을 입력해주세요.');
+        return;
+      }
+      
+      setLoading('askBtn', true);
+      const result = await apiRequest('/api/ask', {
+        method: 'POST',
+        body: JSON.stringify({ question })
+      });
+      setLoading('askBtn', false);
+      
+      showResponse('askResponse', result.data, result.status === 200);
+    });
+    
+    document.getElementById('chatBtn').addEventListener('click', async () => {
+      const message = document.getElementById('chatInput').value.trim();
+      if (!message) {
+        alert('메시지를 입력해주세요.');
+        return;
+      }
+      
+      // 사용자 메시지 추가
+      chatMessages.push({ role: 'user', content: message });
+      updateChatHistory();
+      
+      setLoading('chatBtn', true);
+      const result = await apiRequest('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ messages: chatMessages })
+      });
+      setLoading('chatBtn', false);
+      
+      if (result.status === 200) {
+        // AI 응답 추가
+        chatMessages.push(result.data.message);
+        updateChatHistory();
+        document.getElementById('chatInput').value = '';
+      } else {
+        showResponse('chatHistory', result.data, false);
+      }
+    });
+    
+    document.getElementById('clearChatBtn').addEventListener('click', () => {
+      chatMessages = [];
+      updateChatHistory();
+    });
+    
+    document.getElementById('healthBtn').addEventListener('click', async () => {
+      setLoading('healthBtn', true);
+      const result = await apiRequest('/api/health');
+      setLoading('healthBtn', false);
+      showResponse('statusResponse', result.data, result.status === 200);
+    });
+    
+    document.getElementById('modelsBtn').addEventListener('click', async () => {
+      setLoading('modelsBtn', true);
+      const result = await apiRequest('/api/models');
+      setLoading('modelsBtn', false);
+      showResponse('statusResponse', result.data, result.status === 200);
+    });
+    
+    // 채팅 히스토리 업데이트
+    function updateChatHistory() {
+      const historyElement = document.getElementById('chatHistory');
+      
+      if (chatMessages.length === 0) {
+        historyElement.innerHTML = '<p style="color: #666; font-style: italic;">대화 기록이 없습니다.</p>';
+        return;
+      }
+      
+      const historyHTML = chatMessages.map(msg => {
+        const isUser = msg.role === 'user';
+        const bgColor = isUser ? '#e3f2fd' : '#f3e5f5';
+        const icon = isUser ? '👤' : '🤖';
+        
+        return `
+          <div style="margin: 10px 0; padding: 12px; background: ${bgColor}; border-radius: 8px;">
+            <strong>${icon} ${isUser ? '사용자' : 'AI'}:</strong><br>
+            <span style="margin-top: 5px; display: block;">${msg.content}</span>
+          </div>
+        `;
+      }).join('');
+      
+      historyElement.innerHTML = historyHTML;
+    }
+    
+    // 초기 채팅 히스토리 설정
+    updateChatHistory();
+    
+    // 버튼의 원래 텍스트 저장
+    document.querySelectorAll('button').forEach(btn => {
+      btn.setAttribute('data-original-text', btn.textContent);
+    });
+  </script>
+</body>
+</html> 
