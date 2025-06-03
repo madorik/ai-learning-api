@@ -1,4 +1,5 @@
 const OpenAI = require('openai');
+const { saveProblemGenerationLog } = require('./problem-log-service');
 
 // OpenAI 클라이언트 초기화
 const openai = new OpenAI({
@@ -192,11 +193,15 @@ async function validateApiKey() {
  * @param {number} params.questionCount - 문제 수
  * @param {string} params.difficulty - 난이도
  * @param {string} userId - 사용자 ID
+ * @param {Object} requestInfo - 요청 정보 (API 엔드포인트, User Agent, IP 등)
  * @returns {Promise<Object>} 생성된 문제들
  */
-async function generateProblems(params, userId = null) {
+async function generateProblems(params, userId = null, requestInfo = {}) {
+  const startTime = Date.now(); // 응답 시간 측정 시작
+  let rawResponse = '';
+  
   try {
-    const { subject, grade, questionType, questionCount, difficulty } = params;
+    const { subject, grade, questionType, questionCount, difficulty, includeExplanation = true } = params;
     
     // 입력 검증
     if (!subject || !grade || !questionType || !questionCount || !difficulty) {
@@ -207,7 +212,7 @@ async function generateProblems(params, userId = null) {
       throw new Error('문제 수는 1개 이상 10개 이하로 설정해주세요.');
     }
     
-    console.log(`문제 생성 요청 - 사용자: ${userId || 'anonymous'}, ${subject} ${grade}학년 ${difficulty} ${questionCount}개`);
+    console.log(`문제 생성 요청 - 사용자: ${userId || 'anonymous'}, ${subject} ${grade}학년 ${difficulty} ${questionCount}개, 해설: ${includeExplanation ? '포함' : '제외'}`);
     
     // 프롬프트 생성
     const systemMessage = {
@@ -215,10 +220,19 @@ async function generateProblems(params, userId = null) {
       content: `당신은 교육 전문가이자 문제 출제 전문가입니다. 
       주어진 조건에 맞는 교육용 문제를 생성해주세요.
       문제는 해당 학년 수준에 맞고, 교육과정을 반영해야 합니다.
-      해설은 학생들이 이해하기 쉽도록 단계별로 자세히 설명해주세요.
+      ${includeExplanation ? '해설은 학생들이 이해하기 쉽도록 단계별로 자세히 설명해주세요.' : ''}
       반드시 JSON 형식으로만 응답하고, 다른 텍스트는 포함하지 마세요.`
     };
     
+    // 해설 관련 프롬프트 조정
+    const explanationInstruction = includeExplanation 
+      ? `- explanation: 왜 그 답이 정답인지, 다른 보기들이 왜 틀렸는지 포함한 자세한 해설
+      
+${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 학생들이 완전히 이해할 수 있도록 상세하게 작성해주세요.`
+      : `- explanation: "해설이 제공되지 않습니다."
+      
+${grade}학년 수준에 맞는 적절한 난이도로 출제해주세요.`;
+
     const userMessage = {
       role: 'user',
       content: `다음 조건에 맞는 문제를 생성해주세요:
@@ -228,6 +242,7 @@ async function generateProblems(params, userId = null) {
 문제 유형: ${questionType}
 문제 수: ${questionCount}개
 난이도: ${difficulty}
+해설 포함: ${includeExplanation ? '예' : '아니오'}
 
 응답은 반드시 다음 JSON 형식으로 출력해주세요:
 
@@ -237,12 +252,13 @@ async function generateProblems(params, userId = null) {
   "question_type": "${questionType}",
   "difficulty": "${difficulty}",
   "question_count": ${questionCount},
+  "include_explanation": ${includeExplanation},
   "problems": [
     {
       "question": "문제 내용",
       "choices": ["보기1", "보기2", "보기3", "보기4"],
       "answer": "정답 보기 텍스트",
-      "explanation": "자세한 해설"
+      "explanation": "${includeExplanation ? '자세한 해설' : '해설이 제공되지 않습니다.'}"
     }
   ]
 }
@@ -251,9 +267,7 @@ async function generateProblems(params, userId = null) {
 - question: 명확하고 구체적인 문제 내용
 - choices: 정확히 4개의 보기 (한국어)
 - answer: choices 중 하나와 정확히 일치하는 정답
-- explanation: 왜 그 답이 정답인지, 다른 보기들이 왜 틀렸는지 포함한 자세한 해설
-
-${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 학생들이 완전히 이해할 수 있도록 상세하게 작성해주세요.`
+${explanationInstruction}`
     };
     
     // OpenAI API 호출
@@ -268,14 +282,15 @@ ${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 �
       throw new Error('OpenAI API에서 응답을 받지 못했습니다.');
     }
     
-    const responseContent = completion.choices[0].message.content;
+    rawResponse = completion.choices[0].message.content;
     const usage = completion.usage;
+    const responseTimeMs = Date.now() - startTime;
     
     // JSON 파싱 시도
     let problemsData;
     try {
       // 응답에서 JSON 부분만 추출 (코드 블록 제거)
-      const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
+      const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('응답에서 JSON을 찾을 수 없습니다.');
       }
@@ -283,30 +298,172 @@ ${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 �
       problemsData = JSON.parse(jsonMatch[0]);
     } catch (parseError) {
       console.error('JSON 파싱 오류:', parseError);
+      
+      // 파싱 오류 로그 저장
+      const errorLogData = {
+        userId,
+        requestData: params,
+        responseData: null,
+        rawResponse,
+        metadata: { model: 'gpt-4o-mini', usage },
+        apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems',
+        userAgent: requestInfo.userAgent,
+        ipAddress: requestInfo.ipAddress,
+        responseTimeMs,
+        status: 'error',
+        errorMessage: `JSON 파싱 오류: ${parseError.message}`
+      };
+      
+      try {
+        await saveProblemGenerationLog(errorLogData);
+      } catch (logError) {
+        console.error('로그 저장 오류:', logError);
+      }
+      
       throw new Error('생성된 문제 데이터의 형식이 올바르지 않습니다.');
     }
     
     // 응답 데이터 검증
     if (!problemsData.problems || !Array.isArray(problemsData.problems)) {
-      throw new Error('생성된 문제 데이터의 구조가 올바르지 않습니다.');
+      const error = new Error('생성된 문제 데이터의 구조가 올바르지 않습니다.');
+      
+      // 검증 오류 로그 저장
+      const errorLogData = {
+        userId,
+        requestData: params,
+        responseData: problemsData,
+        rawResponse,
+        metadata: { model: 'gpt-4o-mini', usage },
+        apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems',
+        userAgent: requestInfo.userAgent,
+        ipAddress: requestInfo.ipAddress,
+        responseTimeMs,
+        status: 'error',
+        errorMessage: error.message
+      };
+      
+      try {
+        await saveProblemGenerationLog(errorLogData);
+      } catch (logError) {
+        console.error('로그 저장 오류:', logError);
+      }
+      
+      throw error;
     }
     
     // 각 문제 검증
     for (const problem of problemsData.problems) {
       if (!problem.question || !problem.choices || !problem.answer || !problem.explanation) {
-        throw new Error('문제 데이터에 필수 필드가 누락되었습니다.');
+        const error = new Error('문제 데이터에 필수 필드가 누락되었습니다.');
+        
+        // 검증 오류 로그 저장
+        const errorLogData = {
+          userId,
+          requestData: params,
+          responseData: problemsData,
+          rawResponse,
+          metadata: { model: 'gpt-4o-mini', usage },
+          apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems',
+          userAgent: requestInfo.userAgent,
+          ipAddress: requestInfo.ipAddress,
+          responseTimeMs,
+          status: 'error',
+          errorMessage: error.message
+        };
+        
+        try {
+          await saveProblemGenerationLog(errorLogData);
+        } catch (logError) {
+          console.error('로그 저장 오류:', logError);
+        }
+        
+        throw error;
       }
       
       if (!Array.isArray(problem.choices) || problem.choices.length !== 4) {
-        throw new Error('각 문제는 정확히 4개의 보기를 가져야 합니다.');
+        const error = new Error('각 문제는 정확히 4개의 보기를 가져야 합니다.');
+        
+        // 검증 오류 로그 저장
+        const errorLogData = {
+          userId,
+          requestData: params,
+          responseData: problemsData,
+          rawResponse,
+          metadata: { model: 'gpt-4o-mini', usage },
+          apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems',
+          userAgent: requestInfo.userAgent,
+          ipAddress: requestInfo.ipAddress,
+          responseTimeMs,
+          status: 'error',
+          errorMessage: error.message
+        };
+        
+        try {
+          await saveProblemGenerationLog(errorLogData);
+        } catch (logError) {
+          console.error('로그 저장 오류:', logError);
+        }
+        
+        throw error;
       }
       
       if (!problem.choices.includes(problem.answer)) {
-        throw new Error('정답이 보기에 포함되어 있지 않습니다.');
+        const error = new Error('정답이 보기에 포함되어 있지 않습니다.');
+        
+        // 검증 오류 로그 저장
+        const errorLogData = {
+          userId,
+          requestData: params,
+          responseData: problemsData,
+          rawResponse,
+          metadata: { model: 'gpt-4o-mini', usage },
+          apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems',
+          userAgent: requestInfo.userAgent,
+          ipAddress: requestInfo.ipAddress,
+          responseTimeMs,
+          status: 'error',
+          errorMessage: error.message
+        };
+        
+        try {
+          await saveProblemGenerationLog(errorLogData);
+        } catch (logError) {
+          console.error('로그 저장 오류:', logError);
+        }
+        
+        throw error;
       }
     }
     
     console.log(`문제 생성 완료 - 토큰 사용량: ${usage.total_tokens}, 문제 수: ${problemsData.problems.length}`);
+    
+    // 성공 로그 저장
+    const successLogData = {
+      userId,
+      requestData: params,
+      responseData: problemsData,
+      rawResponse,
+      metadata: {
+        model: completion.model,
+        usage: {
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          totalTokens: usage.total_tokens
+        }
+      },
+      apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems',
+      userAgent: requestInfo.userAgent,
+      ipAddress: requestInfo.ipAddress,
+      responseTimeMs,
+      status: 'success'
+    };
+    
+    try {
+      await saveProblemGenerationLog(successLogData);
+    } catch (logError) {
+      console.error('성공 로그 저장 오류:', logError);
+      // 로그 저장 실패는 전체 프로세스를 중단시키지 않음
+    }
     
     return {
       success: true,
@@ -319,12 +476,36 @@ ${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 �
           totalTokens: usage.total_tokens
         },
         timestamp: new Date().toISOString(),
-        userId: userId
+        userId: userId,
+        responseTimeMs: responseTimeMs
       }
     };
     
   } catch (error) {
     console.error('문제 생성 중 오류:', error);
+    
+    // 일반 오류 로그 저장
+    const responseTimeMs = Date.now() - startTime;
+    const errorLogData = {
+      userId,
+      requestData: params,
+      responseData: null,
+      rawResponse,
+      metadata: { model: 'gpt-4o-mini' },
+      apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems',
+      userAgent: requestInfo.userAgent,
+      ipAddress: requestInfo.ipAddress,
+      responseTimeMs,
+      status: 'error',
+      errorMessage: error.message
+    };
+    
+    try {
+      await saveProblemGenerationLog(errorLogData);
+    } catch (logError) {
+      console.error('오류 로그 저장 실패:', logError);
+    }
+    
     throw error;
   }
 }
@@ -336,10 +517,14 @@ ${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 �
  * @param {Function} onChunk - 스트림 청크 콜백 함수
  * @param {Function} onComplete - 완료 콜백 함수
  * @param {Function} onError - 오류 콜백 함수
+ * @param {Object} requestInfo - 요청 정보 (API 엔드포인트, User Agent, IP 등)
  */
-async function generateProblemsStream(params, userId = null, onChunk, onComplete, onError) {
+async function generateProblemsStream(params, userId = null, onChunk, onComplete, onError, requestInfo = {}) {
+  const startTime = Date.now(); // 응답 시간 측정 시작
+  let fullResponse = '';
+  
   try {
-    const { subject, grade, questionType, questionCount, difficulty } = params;
+    const { subject, grade, questionType, questionCount, difficulty, includeExplanation = true } = params;
     
     // 입력 검증
     if (!subject || !grade || !questionType || !questionCount || !difficulty) {
@@ -350,7 +535,7 @@ async function generateProblemsStream(params, userId = null, onChunk, onComplete
       throw new Error('문제 수는 1개 이상 10개 이하로 설정해주세요.');
     }
     
-    console.log(`실시간 문제 생성 요청 - 사용자: ${userId || 'anonymous'}, ${subject} ${grade}학년 ${difficulty} ${questionCount}개`);
+    console.log(`실시간 문제 생성 요청 - 사용자: ${userId || 'anonymous'}, ${subject} ${grade}학년 ${difficulty} ${questionCount}개, 해설: ${includeExplanation ? '포함' : '제외'}`);
     
     // 시작 메시지 전송
     onChunk({
@@ -365,10 +550,19 @@ async function generateProblemsStream(params, userId = null, onChunk, onComplete
       content: `당신은 교육 전문가이자 문제 출제 전문가입니다. 
       주어진 조건에 맞는 교육용 문제를 생성해주세요.
       문제는 해당 학년 수준에 맞고, 교육과정을 반영해야 합니다.
-      해설은 학생들이 이해하기 쉽도록 단계별로 자세히 설명해주세요.
+      ${includeExplanation ? '해설은 학생들이 이해하기 쉽도록 단계별로 자세히 설명해주세요.' : ''}
       반드시 JSON 형식으로만 응답하고, 다른 텍스트는 포함하지 마세요.`
     };
     
+    // 해설 관련 프롬프트 조정
+    const explanationInstruction = includeExplanation 
+      ? `- explanation: 왜 그 답이 정답인지, 다른 보기들이 왜 틀렸는지 포함한 자세한 해설
+      
+${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 학생들이 완전히 이해할 수 있도록 상세하게 작성해주세요.`
+      : `- explanation: "해설이 제공되지 않습니다."
+      
+${grade}학년 수준에 맞는 적절한 난이도로 출제해주세요.`;
+
     const userMessage = {
       role: 'user',
       content: `다음 조건에 맞는 문제를 생성해주세요:
@@ -378,6 +572,7 @@ async function generateProblemsStream(params, userId = null, onChunk, onComplete
 문제 유형: ${questionType}
 문제 수: ${questionCount}개
 난이도: ${difficulty}
+해설 포함: ${includeExplanation ? '예' : '아니오'}
 
 응답은 반드시 다음 JSON 형식으로 출력해주세요:
 
@@ -387,12 +582,13 @@ async function generateProblemsStream(params, userId = null, onChunk, onComplete
   "question_type": "${questionType}",
   "difficulty": "${difficulty}",
   "question_count": ${questionCount},
+  "include_explanation": ${includeExplanation},
   "problems": [
     {
       "question": "문제 내용",
       "choices": ["보기1", "보기2", "보기3", "보기4"],
       "answer": "정답 보기 텍스트",
-      "explanation": "자세한 해설"
+      "explanation": "${includeExplanation ? '자세한 해설' : '해설이 제공되지 않습니다.'}"
     }
   ]
 }
@@ -401,9 +597,7 @@ async function generateProblemsStream(params, userId = null, onChunk, onComplete
 - question: 명확하고 구체적인 문제 내용
 - choices: 정확히 4개의 보기 (한국어)
 - answer: choices 중 하나와 정확히 일치하는 정답
-- explanation: 왜 그 답이 정답인지, 다른 보기들이 왜 틀렸는지 포함한 자세한 해설
-
-${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 학생들이 완전히 이해할 수 있도록 상세하게 작성해주세요.`
+${explanationInstruction}`
     };
     
     // 진행 상황 전송
@@ -413,7 +607,6 @@ ${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 �
       timestamp: new Date().toISOString()
     });
     
-    let fullResponse = '';
     let tokenCount = 0;
     
     // OpenAI 스트림 API 호출
@@ -463,6 +656,8 @@ ${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 �
       timestamp: new Date().toISOString()
     });
     
+    const responseTimeMs = Date.now() - startTime;
+    
     // JSON 파싱 시도
     let problemsData;
     try {
@@ -475,35 +670,175 @@ ${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 �
       problemsData = JSON.parse(jsonMatch[0]);
     } catch (parseError) {
       console.error('JSON 파싱 오류:', parseError);
+      
+      // 파싱 오류 로그 저장
+      const errorLogData = {
+        userId,
+        requestData: params,
+        responseData: null,
+        rawResponse: fullResponse,
+        metadata: { model: 'gpt-4o-mini', usage: { estimatedTokens: tokenCount } },
+        apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems-stream',
+        userAgent: requestInfo.userAgent,
+        ipAddress: requestInfo.ipAddress,
+        responseTimeMs,
+        status: 'error',
+        errorMessage: `JSON 파싱 오류: ${parseError.message}`
+      };
+      
+      try {
+        await saveProblemGenerationLog(errorLogData);
+      } catch (logError) {
+        console.error('로그 저장 오류:', logError);
+      }
+      
       onError(new Error('생성된 문제 데이터의 형식이 올바르지 않습니다.'));
       return;
     }
     
     // 응답 데이터 검증
     if (!problemsData.problems || !Array.isArray(problemsData.problems)) {
-      onError(new Error('생성된 문제 데이터의 구조가 올바르지 않습니다.'));
+      const error = new Error('생성된 문제 데이터의 구조가 올바르지 않습니다.');
+      
+      // 검증 오류 로그 저장
+      const errorLogData = {
+        userId,
+        requestData: params,
+        responseData: problemsData,
+        rawResponse: fullResponse,
+        metadata: { model: 'gpt-4o-mini', usage: { estimatedTokens: tokenCount } },
+        apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems-stream',
+        userAgent: requestInfo.userAgent,
+        ipAddress: requestInfo.ipAddress,
+        responseTimeMs,
+        status: 'error',
+        errorMessage: error.message
+      };
+      
+      try {
+        await saveProblemGenerationLog(errorLogData);
+      } catch (logError) {
+        console.error('로그 저장 오류:', logError);
+      }
+      
+      onError(error);
       return;
     }
     
     // 각 문제 검증
     for (const problem of problemsData.problems) {
       if (!problem.question || !problem.choices || !problem.answer || !problem.explanation) {
-        onError(new Error('문제 데이터에 필수 필드가 누락되었습니다.'));
+        const error = new Error('문제 데이터에 필수 필드가 누락되었습니다.');
+        
+        // 검증 오류 로그 저장
+        const errorLogData = {
+          userId,
+          requestData: params,
+          responseData: problemsData,
+          rawResponse: fullResponse,
+          metadata: { model: 'gpt-4o-mini', usage: { estimatedTokens: tokenCount } },
+          apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems-stream',
+          userAgent: requestInfo.userAgent,
+          ipAddress: requestInfo.ipAddress,
+          responseTimeMs,
+          status: 'error',
+          errorMessage: error.message
+        };
+        
+        try {
+          await saveProblemGenerationLog(errorLogData);
+        } catch (logError) {
+          console.error('로그 저장 오류:', logError);
+        }
+        
+        onError(error);
         return;
       }
       
       if (!Array.isArray(problem.choices) || problem.choices.length !== 4) {
-        onError(new Error('각 문제는 정확히 4개의 보기를 가져야 합니다.'));
+        const error = new Error('각 문제는 정확히 4개의 보기를 가져야 합니다.');
+        
+        // 검증 오류 로그 저장
+        const errorLogData = {
+          userId,
+          requestData: params,
+          responseData: problemsData,
+          rawResponse: fullResponse,
+          metadata: { model: 'gpt-4o-mini', usage: { estimatedTokens: tokenCount } },
+          apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems-stream',
+          userAgent: requestInfo.userAgent,
+          ipAddress: requestInfo.ipAddress,
+          responseTimeMs,
+          status: 'error',
+          errorMessage: error.message
+        };
+        
+        try {
+          await saveProblemGenerationLog(errorLogData);
+        } catch (logError) {
+          console.error('로그 저장 오류:', logError);
+        }
+        
+        onError(error);
         return;
       }
       
       if (!problem.choices.includes(problem.answer)) {
-        onError(new Error('정답이 보기에 포함되어 있지 않습니다.'));
+        const error = new Error('정답이 보기에 포함되어 있지 않습니다.');
+        
+        // 검증 오류 로그 저장
+        const errorLogData = {
+          userId,
+          requestData: params,
+          responseData: problemsData,
+          rawResponse: fullResponse,
+          metadata: { model: 'gpt-4o-mini', usage: { estimatedTokens: tokenCount } },
+          apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems-stream',
+          userAgent: requestInfo.userAgent,
+          ipAddress: requestInfo.ipAddress,
+          responseTimeMs,
+          status: 'error',
+          errorMessage: error.message
+        };
+        
+        try {
+          await saveProblemGenerationLog(errorLogData);
+        } catch (logError) {
+          console.error('로그 저장 오류:', logError);
+        }
+        
+        onError(error);
         return;
       }
     }
     
     console.log(`실시간 문제 생성 완료 - 예상 토큰 사용량: ${tokenCount}, 문제 수: ${problemsData.problems.length}`);
+    
+    // 성공 로그 저장
+    const successLogData = {
+      userId,
+      requestData: params,
+      responseData: problemsData,
+      rawResponse: fullResponse,
+      metadata: {
+        model: 'gpt-4o-mini',
+        usage: {
+          estimatedTokens: tokenCount
+        }
+      },
+      apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems-stream',
+      userAgent: requestInfo.userAgent,
+      ipAddress: requestInfo.ipAddress,
+      responseTimeMs,
+      status: 'success'
+    };
+    
+    try {
+      await saveProblemGenerationLog(successLogData);
+    } catch (logError) {
+      console.error('성공 로그 저장 오류:', logError);
+      // 로그 저장 실패는 전체 프로세스를 중단시키지 않음
+    }
     
     // 완료 데이터 전송
     onComplete({
@@ -515,12 +850,36 @@ ${grade}학년 수준에 맞는 적절한 난이도로 출제하고, 해설은 �
           estimatedTokens: tokenCount
         },
         timestamp: new Date().toISOString(),
-        userId: userId
+        userId: userId,
+        responseTimeMs: responseTimeMs
       }
     });
     
   } catch (error) {
     console.error('실시간 문제 생성 중 오류:', error);
+    
+    // 일반 오류 로그 저장
+    const responseTimeMs = Date.now() - startTime;
+    const errorLogData = {
+      userId,
+      requestData: params,
+      responseData: null,
+      rawResponse: fullResponse,
+      metadata: { model: 'gpt-4o-mini' },
+      apiEndpoint: requestInfo.apiEndpoint || '/api/generate-problems-stream',
+      userAgent: requestInfo.userAgent,
+      ipAddress: requestInfo.ipAddress,
+      responseTimeMs,
+      status: 'error',
+      errorMessage: error.message
+    };
+    
+    try {
+      await saveProblemGenerationLog(errorLogData);
+    } catch (logError) {
+      console.error('오류 로그 저장 실패:', logError);
+    }
+    
     onError(error);
   }
 }

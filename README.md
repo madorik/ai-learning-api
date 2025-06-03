@@ -234,6 +234,66 @@ console.log('생성된 문제:', result);
 }
 ```
 
+### 2-1. **🔥 실시간 문제 생성 (SSE 스트리밍)**
+
+```javascript
+// 실시간 스트리밍 연결
+const params = new URLSearchParams({
+  subject: "영어",
+  grade: 3,
+  questionType: "교과 과정",
+  questionCount: 5,
+  difficulty: "어려움"
+});
+
+const eventSource = new EventSource(`http://localhost:3000/api/generate-problems-stream?${params}`);
+
+eventSource.onmessage = function(event) {
+  const data = JSON.parse(event.data);
+  
+  switch(data.type) {
+    case 'connected':
+      console.log('연결됨:', data.message);
+      break;
+      
+    case 'start':
+      console.log('시작:', data.message);
+      break;
+      
+    case 'progress':
+      console.log('진행:', data.message);
+      break;
+      
+    case 'chunk':
+      // 실시간으로 받는 GPT 응답 조각
+      console.log('응답 조각:', data.content);
+      console.log('토큰 수:', data.tokenCount);
+      break;
+      
+    case 'parsing':
+      console.log('파싱 중:', data.message);
+      break;
+      
+    case 'complete':
+      console.log('완료!', data.data);
+      eventSource.close();
+      break;
+      
+    case 'error':
+      console.error('오류:', data.error);
+      eventSource.close();
+      break;
+  }
+};
+
+eventSource.onerror = function(error) {
+  console.error('연결 오류:', error);
+};
+
+// 연결 종료
+// eventSource.close();
+```
+
 ### 3. 사용자 통계 조회
 
 ```javascript
@@ -327,78 +387,120 @@ const result = await response.json();
 console.log('AI 응답:', result);
 ```
 
-## 🗄️ 데이터베이스 스키마
+## 📊 문제 생성 로그 & 통계
 
-### 테이블 구조 (UUID 기반)
+모든 문제 생성 요청과 GPT 응답이 Supabase에 자동으로 저장되어 분석과 모니터링이 가능합니다.
 
-1. **users** - 사용자 정보
-   - `id` - UUID 기본키 (자동 생성)
-   - `social_id` - 소셜 로그인 ID (Google ID 등)
-   - `social_provider` - 소셜 제공자 ('google', 'facebook' 등)
-   - `email` - 이메일 주소
-   - `name` - 사용자 이름
-   - `profile_image` - 프로필 이미지
+### 저장되는 데이터
+- **요청 정보**: 과목, 학년, 문제 유형, 난이도 등
+- **응답 정보**: 생성된 문제, GPT 원본 응답
+- **메타데이터**: 토큰 사용량, 응답 시간, 모델 정보
+- **사용자 정보**: 사용자 ID (익명 사용자 포함)
+- **기술 정보**: IP 주소, User Agent, API 엔드포인트
 
-2. **question_sets** - 문제지 정보
-   - `id` - UUID 기본키
-   - `user_id` - UUID 외래키 (users 참조)
-   - 제목, 과목, 학년, 난이도, 문제 수, 상태
+### 통계 조회 API
 
-3. **questions** - 생성된 문제들
-   - `id` - UUID 기본키
-   - `question_set_id` - UUID 외래키 (question_sets 참조)
-   - 문제 내용, 정답, 해설, 난이도 점수
-
-4. **gpt_responses** - GPT 응답 로그
-   - `id` - UUID 기본키
-   - `question_set_id` - UUID 외래키
-   - `user_id` - UUID 외래키
-   - 프롬프트, 응답 내용, 토큰 사용량, 응답 시간
-
-5. **user_responses** - 사용자 답안 (향후 확장)
-   - `id` - UUID 기본키
-   - `user_id` - UUID 외래키
-   - `question_id` - UUID 외래키
-   - `question_set_id` - UUID 외래키
-   - 사용자 답안, 정답 여부, 소요 시간
-
-### UUID 사용의 장점
-
-1. **보안성**: ID 값 추측 불가능
-2. **확장성**: 분산 환경에서 고유성 보장
-3. **호환성**: 다양한 시스템 간 데이터 이전 용이
-4. **표준화**: RFC 4122 표준 준수
-
-### 소셜 인증 확장성
-
-```sql
--- 새로운 소셜 제공자 추가 예시
-INSERT INTO users (social_id, social_provider, email, name) 
-VALUES ('facebook-user-id', 'facebook', 'user@example.com', 'User Name');
-
--- 소셜 제공자별 통계
-SELECT social_provider, COUNT(*) as user_count 
-FROM users 
-GROUP BY social_provider;
+#### 1. 사용자별 통계 조회 (로그인 필요)
+```http
+GET /api/problem-stats?days=30
+Authorization: Bearer YOUR_JWT_TOKEN
 ```
 
-### UUID 샘플 데이터 생성
-
-```sql
--- 개발/테스트용 사용자 생성 함수
-SELECT create_sample_user('google-123456', 'test@example.com', 'Test User', 'google');
-
--- UUID 형식 확인
-SELECT id, social_id, email FROM users WHERE social_provider = 'google';
+**응답 예시:**
+```json
+{
+  "success": true,
+  "period": "최근 30일",
+  "stats": {
+    "totalGenerations": 45,
+    "totalTokensUsed": 12340,
+    "averageResponseTime": 2500,
+    "successCount": 43,
+    "errorCount": 2,
+    "subjectBreakdown": {
+      "영어": 20,
+      "수학": 15,
+      "과학": 10
+    },
+    "gradeBreakdown": {
+      "3": 25,
+      "4": 12,
+      "5": 8
+    },
+    "difficultyBreakdown": {
+      "쉬움": 15,
+      "보통": 20,
+      "어려움": 10
+    },
+    "recentActivity": [...] // 최근 10개 활동
+  }
+}
 ```
 
-### Row Level Security (RLS)
+#### 2. 전체 통계 조회 (관리자용)
+```http
+GET /api/admin/problem-stats?days=7&limit=100
+```
 
-모든 테이블에 RLS가 적용되어 사용자는 자신의 데이터만 접근할 수 있습니다.
+#### 3. 사용자별 로그 목록 조회
+```http
+GET /api/problem-logs?limit=20&offset=0
+Authorization: Bearer YOUR_JWT_TOKEN
+```
 
-### 데이터 마이그레이션
+#### 4. 특정 로그 상세 조회
+```http
+GET /api/problem-logs/{logId}
+Authorization: Bearer YOUR_JWT_TOKEN
+```
 
-기존 `BIGINT` ID를 사용하던 데이터는 새로운 설치 시 자동으로 UUID 스키마로 적용됩니다.
+### 데이터베이스 설정
+
+1. **테이블 생성**: `database/problem-generation-logs.sql` 실행
+```sql
+-- Supabase SQL Editor에서 실행
+\i database/problem-generation-logs.sql
+```
+
+2. **RLS 정책**: 자동으로 설정됨
+   - 사용자는 본인 로그만 조회 가능
+   - 익명 사용자 로그 생성 허용
+   - 관리자는 전체 통계 조회 가능
+
+3. **인덱스 최적화**: JSONB 및 검색 필드에 자동 인덱스 생성
+
+### 통계 뷰
+
+#### 전체 통계 뷰
+```sql
+SELECT * FROM problem_generation_stats 
+WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+ORDER BY date DESC;
+```
+
+#### 사용자별 통계 뷰
+```sql
+SELECT * FROM user_problem_generation_stats 
+WHERE total_generations > 0
+ORDER BY total_generations DESC;
+```
+
+### 데이터 관리
+
+#### 오래된 로그 정리 (90일 이전)
+```sql
+SELECT cleanup_old_problem_logs(90);
+```
+
+### 에러 모니터링
+
+시스템은 다음과 같은 오류를 자동으로 로그에 기록합니다:
+- JSON 파싱 오류
+- 데이터 검증 오류  
+- API 호출 오류
+- 네트워크 타임아웃
+
+각 오류는 상세한 오류 메시지와 함께 저장되어 디버깅에 활용할 수 있습니다.
 
 ## 🔒 보안 기능
 

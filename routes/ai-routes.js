@@ -1,5 +1,6 @@
 const express = require('express');
 const { askChatGPT, chatWithHistory, validateApiKey, generateProblems, generateProblemsStream } = require('../services/openai-service');
+const { getUserProblemStats, getGlobalProblemStats, getUserProblemLogs, getProblemGenerationLog } = require('../services/problem-log-service');
 const { optionalAuth, authenticateToken } = require('../utils/jwt-utils');
 
 const router = express.Router();
@@ -232,12 +233,13 @@ router.get('/models', async (req, res) => {
  *   "grade": 3,
  *   "questionType": "교과 과정",
  *   "questionCount": 5,
- *   "difficulty": "어려움"
+ *   "difficulty": "어려움",
+ *   "includeExplanation": true
  * }
  */
 router.post('/generate-problems', optionalAuth, async (req, res) => {
   try {
-    const { subject, grade, questionType, questionCount, difficulty } = req.body;
+    const { subject, grade, questionType, questionCount, difficulty, includeExplanation = true } = req.body;
     
     // 입력 검증
     if (!subject || !grade || !questionType || !questionCount || !difficulty) {
@@ -249,7 +251,8 @@ router.post('/generate-problems', optionalAuth, async (req, res) => {
           grade: 3,
           questionType: "교과 과정",
           questionCount: 5,
-          difficulty: "어려움"
+          difficulty: "어려움",
+          includeExplanation: true
         }
       });
     }
@@ -269,6 +272,14 @@ router.post('/generate-problems', optionalAuth, async (req, res) => {
       });
     }
     
+    // includeExplanation boolean 검증 추가
+    if (typeof includeExplanation !== 'boolean') {
+      return res.status(400).json({
+        error: 'includeExplanation은 boolean 값이어야 합니다.',
+        message: 'includeExplanation 필드는 true 또는 false로 입력해주세요.'
+      });
+    }
+    
     // 사용자 ID 추출 (로그인한 경우)
     const userId = req.user ? req.user.id : null;
     
@@ -278,11 +289,19 @@ router.post('/generate-problems', optionalAuth, async (req, res) => {
       grade,
       questionType: questionType.trim(),
       questionCount,
-      difficulty: difficulty.trim()
+      difficulty: difficulty.trim(),
+      includeExplanation: includeExplanation
+    };
+    
+    // 요청 정보 수집
+    const requestInfo = {
+      apiEndpoint: '/api/generate-problems',
+      userAgent: req.get('User-Agent'),
+      ipAddress: req.ip || req.connection.remoteAddress
     };
     
     // 문제 생성 API 호출
-    const result = await generateProblems(problemParams, userId);
+    const result = await generateProblems(problemParams, userId, requestInfo);
     
     res.json({
       success: true,
@@ -311,13 +330,14 @@ router.post('/generate-problems', optionalAuth, async (req, res) => {
  * - questionType: 문제 유형
  * - questionCount: 문제 수
  * - difficulty: 난이도
+ * - includeExplanation: 해설 포함 여부
  */
 router.get('/generate-problems-stream', optionalAuth, async (req, res) => {
   try {
-    const { subject, grade, questionType, questionCount, difficulty } = req.query;
+    const { subject, grade, questionType, questionCount, difficulty, includeExplanation } = req.query;
     
     // 입력 검증
-    if (!subject || !grade || !questionType || !questionCount || !difficulty) {
+    if (!subject || !grade || !questionType || !questionCount || !difficulty || !includeExplanation) {
       return res.status(400).json({
         error: '필수 파라미터가 누락되었습니다.',
         message: 'subject, grade, questionType, questionCount, difficulty 모든 쿼리 파라미터가 필요합니다.',
@@ -358,7 +378,15 @@ router.get('/generate-problems-stream', optionalAuth, async (req, res) => {
       grade: gradeNum,
       questionType: questionType.trim(),
       questionCount: questionCountNum,
-      difficulty: difficulty.trim()
+      difficulty: difficulty.trim(),
+      includeExplanation: includeExplanation === 'true'
+    };
+    
+    // 요청 정보 수집
+    const requestInfo = {
+      apiEndpoint: '/api/generate-problems-stream',
+      userAgent: req.get('User-Agent'),
+      ipAddress: req.ip || req.connection.remoteAddress
     };
     
     // SSE 메시지 전송 함수
@@ -402,7 +430,7 @@ router.get('/generate-problems-stream', optionalAuth, async (req, res) => {
     });
     
     // 스트리밍 문제 생성 시작
-    await generateProblemsStream(problemParams, userId, onChunk, onComplete, onError);
+    await generateProblemsStream(problemParams, userId, onChunk, onComplete, onError, requestInfo);
     
   } catch (error) {
     console.error('실시간 문제 생성 중 오류:', error);
@@ -415,6 +443,137 @@ router.get('/generate-problems-stream', optionalAuth, async (req, res) => {
     
     res.write(`data: ${JSON.stringify(errorData)}\n\n`);
     res.end();
+  }
+});
+
+/**
+ * 사용자별 문제 생성 통계 조회 (로그인 필요)
+ * GET /api/problem-stats
+ * 
+ * Query Parameters:
+ * - days: 최근 며칠간의 데이터 (기본: 30일)
+ */
+router.get('/problem-stats', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { days = 30 } = req.query;
+    
+    const result = await getUserProblemStats(userId, { days: parseInt(days) });
+    
+    res.json({
+      success: true,
+      message: '사용자 문제 생성 통계를 조회했습니다.',
+      ...result
+    });
+    
+  } catch (error) {
+    console.error('사용자 통계 조회 중 오류:', error);
+    
+    res.status(500).json({
+      error: '통계 조회 중 오류가 발생했습니다.',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * 전체 문제 생성 통계 조회 (관리자용)
+ * GET /api/admin/problem-stats
+ * 
+ * Query Parameters:
+ * - days: 최근 며칠간의 데이터 (기본: 7일)
+ * - limit: 결과 수 제한 (기본: 100)
+ */
+router.get('/admin/problem-stats', async (req, res) => {
+  try {
+    const { days = 7, limit = 100 } = req.query;
+    
+    const result = await getGlobalProblemStats({
+      days: parseInt(days),
+      limit: parseInt(limit)
+    });
+    
+    res.json({
+      success: true,
+      message: '전체 문제 생성 통계를 조회했습니다.',
+      ...result
+    });
+    
+  } catch (error) {
+    console.error('전체 통계 조회 중 오류:', error);
+    
+    res.status(500).json({
+      error: '통계 조회 중 오류가 발생했습니다.',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * 사용자별 문제 생성 로그 목록 조회 (로그인 필요)
+ * GET /api/problem-logs
+ * 
+ * Query Parameters:
+ * - limit: 결과 수 제한 (기본: 20)
+ * - offset: 오프셋 (기본: 0)
+ */
+router.get('/problem-logs', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { limit = 20, offset = 0 } = req.query;
+    
+    const result = await getUserProblemLogs(userId, {
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+    
+    res.json({
+      success: true,
+      message: '사용자 문제 생성 로그를 조회했습니다.',
+      ...result
+    });
+    
+  } catch (error) {
+    console.error('로그 목록 조회 중 오류:', error);
+    
+    res.status(500).json({
+      error: '로그 조회 중 오류가 발생했습니다.',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * 특정 문제 생성 로그 상세 조회 (로그인 필요)
+ * GET /api/problem-logs/:logId
+ */
+router.get('/problem-logs/:logId', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { logId } = req.params;
+    
+    const result = await getProblemGenerationLog(logId, userId);
+    
+    if (!result.success) {
+      return res.status(404).json({
+        error: '로그를 찾을 수 없습니다.',
+        message: result.error
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: '문제 생성 로그 상세 정보를 조회했습니다.',
+      data: result.data
+    });
+    
+  } catch (error) {
+    console.error('로그 상세 조회 중 오류:', error);
+    
+    res.status(500).json({
+      error: '로그 조회 중 오류가 발생했습니다.',
+      message: error.message
+    });
   }
 });
 

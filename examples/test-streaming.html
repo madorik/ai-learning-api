@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>실시간 문제 생성 - GPT-4o mini Stream</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 10px;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #555;
+      font-size: 14px;
+    }
+    select, input {
+      width: 100%;
+      padding: 10px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    select:focus, input:focus {
+      outline: none;
+      border-color: #4CAF50;
+    }
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 30px;
+    }
+    button {
+      flex: 1;
+      padding: 15px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .btn-primary {
+      background: #4CAF50;
+      color: white;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #45a049;
+      transform: translateY(-2px);
+    }
+    .btn-secondary {
+      background: #f44336;
+      color: white;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: #da190b;
+    }
+    button:disabled {
+      background: #cccccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .status-panel {
+      background: #f8f9fa;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .status-header {
+      background: #343a40;
+      color: white;
+      padding: 15px;
+      border-radius: 6px 6px 0 0;
+      font-weight: 600;
+    }
+    .status-content {
+      padding: 20px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .status-message {
+      padding: 8px 12px;
+      margin: 5px 0;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .status-connected { background: #d4edda; color: #155724; border-left: 4px solid #28a745; }
+    .status-start { background: #cce5ff; color: #004085; border-left: 4px solid #007bff; }
+    .status-progress { background: #fff3cd; color: #856404; border-left: 4px solid #ffc107; }
+    .status-stream { background: #e7f3ff; color: #0056b3; border-left: 4px solid #17a2b8; }
+    .status-parsing { background: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }
+    .status-error { background: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }
+    .status-complete { background: #d1ecf1; color: #0c5460; border-left: 4px solid #17a2b8; }
+    
+    .stream-content {
+      background: #2d3748;
+      color: #e2e8f0;
+      border-radius: 8px;
+      margin: 20px 0;
+      font-family: 'Courier New', monospace;
+    }
+    .stream-header {
+      background: #4a5568;
+      color: white;
+      padding: 15px;
+      border-radius: 6px 6px 0 0;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .stream-body {
+      padding: 20px;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .token-counter {
+      background: #667eea;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+    
+    .result {
+      margin-top: 30px;
+      padding: 20px;
+      background: #f9f9f9;
+      border-radius: 8px;
+      border-left: 4px solid #4CAF50;
+    }
+    .problem {
+      margin: 20px 0;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .question {
+      font-weight: 600;
+      margin-bottom: 15px;
+      color: #333;
+      font-size: 16px;
+    }
+    .choices {
+      margin: 15px 0;
+    }
+    .choice {
+      padding: 8px 0;
+      margin: 5px 0;
+    }
+    .choice.correct {
+      background: #e8f5e8;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-weight: 600;
+      color: #2e7d32;
+    }
+    .explanation {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f0f8ff;
+      border-radius: 6px;
+      border-left: 3px solid #2196f3;
+    }
+    .metadata {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #666;
+    }
+    
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+    .loading {
+      animation: pulse 2s infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🚀 실시간 문제 생성</h1>
+      <p>GPT-4o mini가 실시간으로 문제를 생성하는 과정을 지켜보세요!</p>
+    </div>
+    
+    <form id="streamForm">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="subject">과목</label>
+          <select id="subject" required>
+            <option value="">선택</option>
+            <option value="영어">영어</option>
+            <option value="수학">수학</option>
+            <option value="국어">국어</option>
+            <option value="과학">과학</option>
+            <option value="사회">사회</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="grade">학년</label>
+          <select id="grade" required>
+            <option value="">선택</option>
+            <option value="1">1학년</option>
+            <option value="2">2학년</option>
+            <option value="3">3학년</option>
+            <option value="4">4학년</option>
+            <option value="5">5학년</option>
+            <option value="6">6학년</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="questionType">문제 유형</label>
+          <select id="questionType" required>
+            <option value="">선택</option>
+            <option value="교과 과정">교과 과정</option>
+            <option value="응용 문제">응용 문제</option>
+            <option value="기초 개념">기초 개념</option>
+            <option value="실생활 응용">실생활 응용</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="questionCount">문제 수</label>
+          <select id="questionCount" required>
+            <option value="">선택</option>
+            <option value="1">1개</option>
+            <option value="2">2개</option>
+            <option value="3">3개</option>
+            <option value="5">5개</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="difficulty">난이도</label>
+          <select id="difficulty" required>
+            <option value="">선택</option>
+            <option value="쉬움">쉬움</option>
+            <option value="보통">보통</option>
+            <option value="어려움">어려움</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="includeExplanation">해설 포함</label>
+          <select id="includeExplanation" required>
+            <option value="">선택</option>
+            <option value="true">포함</option>
+            <option value="false">제외</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="button-group">
+        <button type="submit" id="startBtn" class="btn-primary">🚀 실시간 생성 시작</button>
+        <button type="button" id="stopBtn" class="btn-secondary" disabled>⏹️ 중단</button>
+      </div>
+    </form>
+
+    <!-- 상태 패널 -->
+    <div class="status-panel">
+      <div class="status-header">📊 실시간 상태</div>
+      <div class="status-content" id="statusContent">
+        <div class="status-message">대기 중... 위에서 조건을 선택하고 시작 버튼을 눌러주세요.</div>
+      </div>
+    </div>
+
+    <!-- 스트림 내용 -->
+    <div class="stream-content" id="streamPanel" style="display: none;">
+      <div class="stream-header">
+        <span>💬 GPT 응답 스트림</span>
+        <span class="token-counter" id="tokenCounter">토큰: 0</span>
+      </div>
+      <div class="stream-body" id="streamContent"></div>
+    </div>
+
+    <!-- 결과 -->
+    <div id="result"></div>
+  </div>
+
+  <script>
+    let eventSource = null;
+    let tokenCount = 0;
+    
+    const form = document.getElementById('streamForm');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusContent = document.getElementById('statusContent');
+    const streamPanel = document.getElementById('streamPanel');
+    const streamContent = document.getElementById('streamContent');
+    const tokenCounter = document.getElementById('tokenCounter');
+    const result = document.getElementById('result');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      startStreaming();
+    });
+
+    stopBtn.addEventListener('click', () => {
+      stopStreaming();
+    });
+
+    function startStreaming() {
+      // 폼 데이터 수집
+      const formData = {
+        subject: document.getElementById('subject').value,
+        grade: document.getElementById('grade').value,
+        questionType: document.getElementById('questionType').value,
+        questionCount: document.getElementById('questionCount').value,
+        difficulty: document.getElementById('difficulty').value,
+        includeExplanation: document.getElementById('includeExplanation').value
+      };
+
+      // 입력 검증
+      if (!formData.subject || !formData.grade || !formData.questionType || 
+          !formData.questionCount || !formData.difficulty || !formData.includeExplanation) {
+        alert('모든 필드를 선택해주세요!');
+        return;
+      }
+
+      // UI 상태 변경
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      startBtn.textContent = '생성 중...';
+      
+      // 초기화
+      tokenCount = 0;
+      statusContent.innerHTML = '';
+      streamContent.textContent = '';
+      result.innerHTML = '';
+      streamPanel.style.display = 'block';
+      updateTokenCounter();
+
+      // 쿼리 스트링 생성
+      const queryParams = new URLSearchParams(formData).toString();
+      const url = `http://localhost:3000/api/generate-problems-stream?${queryParams}`;
+
+      // EventSource 연결
+      eventSource = new EventSource(url);
+
+      eventSource.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          handleStreamData(data);
+        } catch (error) {
+          console.error('데이터 파싱 오류:', error);
+        }
+      };
+
+      eventSource.onerror = function(error) {
+        console.error('SSE 연결 오류:', error);
+        addStatus('error', '연결 오류가 발생했습니다.');
+        stopStreaming();
+      };
+    }
+
+    function stopStreaming() {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      startBtn.textContent = '🚀 실시간 생성 시작';
+      
+      addStatus('stop', '스트리밍이 중단되었습니다.');
+    }
+
+    function handleStreamData(data) {
+      switch (data.type) {
+        case 'connected':
+          addStatus('connected', `연결됨: ${data.message}`);
+          break;
+          
+        case 'start':
+          addStatus('start', data.message);
+          break;
+          
+        case 'progress':
+          addStatus('progress', data.message);
+          break;
+          
+        case 'stream_start':
+          addStatus('stream', data.message);
+          break;
+          
+        case 'chunk':
+          appendStreamContent(data.content);
+          tokenCount = data.tokenCount;
+          updateTokenCounter();
+          break;
+          
+        case 'parsing':
+          addStatus('parsing', data.message);
+          break;
+          
+        case 'complete':
+          addStatus('complete', '문제 생성이 완료되었습니다!');
+          displayResult(data);
+          stopStreaming();
+          break;
+          
+        case 'error':
+          addStatus('error', `오류: ${data.error}`);
+          stopStreaming();
+          break;
+      }
+    }
+
+    function addStatus(type, message) {
+      const statusDiv = document.createElement('div');
+      statusDiv.className = `status-message status-${type}`;
+      statusDiv.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+      statusContent.appendChild(statusDiv);
+      statusContent.scrollTop = statusContent.scrollHeight;
+    }
+
+    function appendStreamContent(content) {
+      streamContent.textContent += content;
+      streamContent.scrollTop = streamContent.scrollHeight;
+    }
+
+    function updateTokenCounter() {
+      tokenCounter.textContent = `토큰: ${tokenCount}`;
+    }
+
+    function displayResult(data) {
+      if (!data.data || !data.data.problems) {
+        result.innerHTML = '<div class="result error">결과 데이터가 올바르지 않습니다.</div>';
+        return;
+      }
+
+      let html = `
+        <div class="result">
+          <h2>✅ 실시간 생성 완료!</h2>
+          <p><strong>과목:</strong> ${data.data.subject}</p>
+          <p><strong>학년:</strong> ${data.data.grade}학년</p>
+          <p><strong>문제 유형:</strong> ${data.data.question_type}</p>
+          <p><strong>난이도:</strong> ${data.data.difficulty}</p>
+          <p><strong>문제 수:</strong> ${data.data.question_count}개</p>
+      `;
+
+      // 각 문제 표시
+      data.data.problems.forEach((problem, index) => {
+        html += `
+          <div class="problem">
+            <h3>📖 문제 ${index + 1}</h3>
+            <div class="question">${problem.question}</div>
+            
+            <div class="choices">
+              <strong>보기:</strong>
+              ${problem.choices.map((choice, idx) => `
+                <div class="choice ${choice === problem.answer ? 'correct' : ''}">
+                  ${idx + 1}) ${choice} ${choice === problem.answer ? '✓' : ''}
+                </div>
+              `).join('')}
+            </div>
+
+            <div class="explanation">
+              <strong>💡 해설:</strong><br>
+              ${problem.explanation}
+            </div>
+          </div>
+        `;
+      });
+
+      // 메타데이터 표시
+      if (data.metadata) {
+        html += `
+          <div class="metadata">
+            <strong>📊 생성 정보:</strong><br>
+            모델: ${data.metadata.model}<br>
+            예상 토큰 사용량: ${data.metadata.usage.estimatedTokens}<br>
+            생성 시간: ${new Date(data.metadata.timestamp).toLocaleString('ko-KR')}
+          </div>
+        `;
+      }
+
+      html += '</div>';
+      result.innerHTML = html;
+    }
+
+    // 페이지 언로드 시 연결 정리
+    window.addEventListener('beforeunload', () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    });
+  </script>
+</body>
+</html> 
