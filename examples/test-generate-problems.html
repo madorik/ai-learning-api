@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>문제 생성 API 테스트</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #555;
+    }
+    select, input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    select:focus, input:focus {
+      outline: none;
+      border-color: #4CAF50;
+    }
+    button {
+      width: 100%;
+      padding: 15px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #cccccc;
+      cursor: not-allowed;
+    }
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+    .result {
+      margin-top: 30px;
+      padding: 20px;
+      background: #f9f9f9;
+      border-radius: 8px;
+      border-left: 4px solid #4CAF50;
+    }
+    .error {
+      border-left-color: #f44336;
+      background: #ffeaea;
+    }
+    .problem {
+      margin: 20px 0;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+    }
+    .question {
+      font-weight: 600;
+      margin-bottom: 15px;
+      color: #333;
+    }
+    .choices {
+      margin: 15px 0;
+    }
+    .choice {
+      padding: 8px 0;
+      margin: 5px 0;
+    }
+    .choice.correct {
+      background: #e8f5e8;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-weight: 600;
+      color: #2e7d32;
+    }
+    .explanation {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f0f8ff;
+      border-radius: 6px;
+      border-left: 3px solid #2196f3;
+    }
+    .metadata {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 GPT-4o mini 문제 생성 테스트</h1>
+    
+    <form id="problemForm">
+      <div class="form-group">
+        <label for="subject">과목</label>
+        <select id="subject" required>
+          <option value="">과목을 선택하세요</option>
+          <option value="영어">영어</option>
+          <option value="수학">수학</option>
+          <option value="국어">국어</option>
+          <option value="과학">과학</option>
+          <option value="사회">사회</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="grade">학년</label>
+        <select id="grade" required>
+          <option value="">학년을 선택하세요</option>
+          <option value="1">1학년</option>
+          <option value="2">2학년</option>
+          <option value="3">3학년</option>
+          <option value="4">4학년</option>
+          <option value="5">5학년</option>
+          <option value="6">6학년</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="questionType">문제 유형</label>
+        <select id="questionType" required>
+          <option value="">문제 유형을 선택하세요</option>
+          <option value="교과 과정">교과 과정</option>
+          <option value="응용 문제">응용 문제</option>
+          <option value="기초 개념">기초 개념</option>
+          <option value="실생활 응용">실생활 응용</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="questionCount">문제 수</label>
+        <select id="questionCount" required>
+          <option value="">문제 수를 선택하세요</option>
+          <option value="1">1개</option>
+          <option value="2">2개</option>
+          <option value="3">3개</option>
+          <option value="5">5개</option>
+          <option value="10">10개</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="difficulty">난이도</label>
+        <select id="difficulty" required>
+          <option value="">난이도를 선택하세요</option>
+          <option value="쉬움">쉬움</option>
+          <option value="보통">보통</option>
+          <option value="어려움">어려움</option>
+        </select>
+      </div>
+
+      <button type="submit" id="generateBtn">🚀 문제 생성하기</button>
+    </form>
+
+    <div id="loading" class="loading" style="display: none;">
+      <p>⏳ GPT-4o mini가 문제를 생성 중입니다...</p>
+      <p>잠시만 기다려주세요.</p>
+    </div>
+
+    <div id="result"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('problemForm');
+    const generateBtn = document.getElementById('generateBtn');
+    const loading = document.getElementById('loading');
+    const result = document.getElementById('result');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      // 폼 데이터 수집
+      const formData = {
+        subject: document.getElementById('subject').value,
+        grade: parseInt(document.getElementById('grade').value),
+        questionType: document.getElementById('questionType').value,
+        questionCount: parseInt(document.getElementById('questionCount').value),
+        difficulty: document.getElementById('difficulty').value
+      };
+
+      // UI 상태 변경
+      generateBtn.disabled = true;
+      generateBtn.textContent = '생성 중...';
+      loading.style.display = 'block';
+      result.innerHTML = '';
+
+      try {
+        // API 요청
+        const response = await fetch('http://localhost:3000/api/generate-problems', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(formData)
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          displayResult(data);
+        } else {
+          displayError(data);
+        }
+
+      } catch (error) {
+        displayError({
+          error: '네트워크 오류',
+          message: '서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.'
+        });
+      } finally {
+        // UI 상태 복원
+        generateBtn.disabled = false;
+        generateBtn.textContent = '🚀 문제 생성하기';
+        loading.style.display = 'none';
+      }
+    });
+
+    function displayResult(data) {
+      let html = `
+        <div class="result">
+          <h2>✅ 문제 생성 완료!</h2>
+          <p><strong>과목:</strong> ${data.subject}</p>
+          <p><strong>학년:</strong> ${data.grade}학년</p>
+          <p><strong>문제 유형:</strong> ${data.question_type}</p>
+          <p><strong>난이도:</strong> ${data.difficulty}</p>
+          <p><strong>문제 수:</strong> ${data.question_count}개</p>
+      `;
+
+      // 각 문제 표시
+      data.problems.forEach((problem, index) => {
+        html += `
+          <div class="problem">
+            <h3>📖 문제 ${index + 1}</h3>
+            <div class="question">${problem.question}</div>
+            
+            <div class="choices">
+              <strong>보기:</strong>
+              ${problem.choices.map((choice, idx) => `
+                <div class="choice ${choice === problem.answer ? 'correct' : ''}">
+                  ${idx + 1}) ${choice} ${choice === problem.answer ? '✓' : ''}
+                </div>
+              `).join('')}
+            </div>
+
+            <div class="explanation">
+              <strong>💡 해설:</strong><br>
+              ${problem.explanation}
+            </div>
+          </div>
+        `;
+      });
+
+      // 메타데이터 표시
+      if (data.metadata) {
+        html += `
+          <div class="metadata">
+            <strong>📊 생성 정보:</strong><br>
+            모델: ${data.metadata.model}<br>
+            토큰 사용량: ${data.metadata.usage.totalTokens}<br>
+            생성 시간: ${new Date(data.metadata.timestamp).toLocaleString('ko-KR')}
+          </div>
+        `;
+      }
+
+      html += '</div>';
+      result.innerHTML = html;
+    }
+
+    function displayError(data) {
+      result.innerHTML = `
+        <div class="result error">
+          <h2>❌ 오류 발생</h2>
+          <p><strong>오류:</strong> ${data.error}</p>
+          <p><strong>메시지:</strong> ${data.message}</p>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html> 

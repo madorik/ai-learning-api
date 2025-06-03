@@ -1,5 +1,5 @@
 const express = require('express');
-const { askChatGPT, chatWithHistory, validateApiKey } = require('../services/openai-service');
+const { askChatGPT, chatWithHistory, validateApiKey, generateProblems, generateProblemsStream } = require('../services/openai-service');
 const { optionalAuth, authenticateToken } = require('../utils/jwt-utils');
 
 const router = express.Router();
@@ -220,6 +220,201 @@ router.get('/models', async (req, res) => {
       error: '모델 정보 조회 중 오류가 발생했습니다.',
       message: error.message
     });
+  }
+});
+
+/**
+ * 교육용 문제 생성 API
+ * POST /api/generate-problems
+ * 
+ * Body: {
+ *   "subject": "영어",
+ *   "grade": 3,
+ *   "questionType": "교과 과정",
+ *   "questionCount": 5,
+ *   "difficulty": "어려움"
+ * }
+ */
+router.post('/generate-problems', optionalAuth, async (req, res) => {
+  try {
+    const { subject, grade, questionType, questionCount, difficulty } = req.body;
+    
+    // 입력 검증
+    if (!subject || !grade || !questionType || !questionCount || !difficulty) {
+      return res.status(400).json({
+        error: '필수 파라미터가 누락되었습니다.',
+        message: 'subject, grade, questionType, questionCount, difficulty 모든 필드가 필요합니다.',
+        example: {
+          subject: "영어",
+          grade: 3,
+          questionType: "교과 과정",
+          questionCount: 5,
+          difficulty: "어려움"
+        }
+      });
+    }
+    
+    // 데이터 타입 검증
+    if (typeof grade !== 'number' || grade < 1 || grade > 12) {
+      return res.status(400).json({
+        error: '학년은 1-12 사이의 숫자여야 합니다.',
+        message: 'grade 필드는 1에서 12 사이의 숫자로 입력해주세요.'
+      });
+    }
+    
+    if (typeof questionCount !== 'number' || questionCount < 1 || questionCount > 10) {
+      return res.status(400).json({
+        error: '문제 수는 1-10 사이의 숫자여야 합니다.',
+        message: 'questionCount 필드는 1에서 10 사이의 숫자로 입력해주세요.'
+      });
+    }
+    
+    // 사용자 ID 추출 (로그인한 경우)
+    const userId = req.user ? req.user.id : null;
+    
+    // 문제 생성 파라미터
+    const problemParams = {
+      subject: subject.trim(),
+      grade,
+      questionType: questionType.trim(),
+      questionCount,
+      difficulty: difficulty.trim()
+    };
+    
+    // 문제 생성 API 호출
+    const result = await generateProblems(problemParams, userId);
+    
+    res.json({
+      success: true,
+      message: '문제가 성공적으로 생성되었습니다.',
+      ...result.data,
+      metadata: result.metadata
+    });
+    
+  } catch (error) {
+    console.error('문제 생성 중 오류:', error);
+    
+    res.status(500).json({
+      error: '문제 생성 중 오류가 발생했습니다.',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * 교육용 문제 실시간 생성 API (Server-Sent Events)
+ * GET /api/generate-problems-stream
+ * 
+ * Query Parameters:
+ * - subject: 과목
+ * - grade: 학년
+ * - questionType: 문제 유형
+ * - questionCount: 문제 수
+ * - difficulty: 난이도
+ */
+router.get('/generate-problems-stream', optionalAuth, async (req, res) => {
+  try {
+    const { subject, grade, questionType, questionCount, difficulty } = req.query;
+    
+    // 입력 검증
+    if (!subject || !grade || !questionType || !questionCount || !difficulty) {
+      return res.status(400).json({
+        error: '필수 파라미터가 누락되었습니다.',
+        message: 'subject, grade, questionType, questionCount, difficulty 모든 쿼리 파라미터가 필요합니다.',
+        example: '?subject=영어&grade=3&questionType=교과 과정&questionCount=5&difficulty=어려움'
+      });
+    }
+    
+    // 데이터 타입 검증
+    const gradeNum = parseInt(grade);
+    const questionCountNum = parseInt(questionCount);
+    
+    if (isNaN(gradeNum) || gradeNum < 1 || gradeNum > 12) {
+      return res.status(400).json({
+        error: '학년은 1-12 사이의 숫자여야 합니다.'
+      });
+    }
+    
+    if (isNaN(questionCountNum) || questionCountNum < 1 || questionCountNum > 10) {
+      return res.status(400).json({
+        error: '문제 수는 1-10 사이의 숫자여야 합니다.'
+      });
+    }
+    
+    // SSE 헤더 설정
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Cache-Control'
+    });
+    
+    const userId = req.user ? req.user.id : null;
+    
+    // 문제 생성 파라미터
+    const problemParams = {
+      subject: subject.trim(),
+      grade: gradeNum,
+      questionType: questionType.trim(),
+      questionCount: questionCountNum,
+      difficulty: difficulty.trim()
+    };
+    
+    // SSE 메시지 전송 함수
+    const sendSSE = (data) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+    
+    // 연결 시작 메시지
+    sendSSE({
+      type: 'connected',
+      message: 'Server-Sent Events 연결이 설정되었습니다.',
+      params: problemParams,
+      timestamp: new Date().toISOString()
+    });
+    
+    // 스트림 콜백 함수들
+    const onChunk = (data) => {
+      sendSSE(data);
+    };
+    
+    const onComplete = (result) => {
+      sendSSE({
+        type: 'complete',
+        ...result
+      });
+      res.end();
+    };
+    
+    const onError = (error) => {
+      sendSSE({
+        type: 'error',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+      res.end();
+    };
+    
+    // 클라이언트 연결 종료 처리
+    req.on('close', () => {
+      console.log('클라이언트가 SSE 연결을 종료했습니다.');
+    });
+    
+    // 스트리밍 문제 생성 시작
+    await generateProblemsStream(problemParams, userId, onChunk, onComplete, onError);
+    
+  } catch (error) {
+    console.error('실시간 문제 생성 중 오류:', error);
+    
+    const errorData = {
+      type: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    };
+    
+    res.write(`data: ${JSON.stringify(errorData)}\n\n`);
+    res.end();
   }
 });
 

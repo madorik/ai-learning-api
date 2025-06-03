@@ -150,6 +150,8 @@ npm start
 |--------|------------|------|-----------|
 | `POST` | `/api/ask` | 단일 질문 | ✅ |
 | `POST` | `/api/chat` | 대화형 채팅 | ✅ |
+| `POST` | `/api/generate-problems` | **교육용 문제 생성** | ❌ |
+| `GET` | `/api/generate-problems-stream` | **🔥 실시간 문제 생성 (SSE)** | ❌ |
 | `GET` | `/api/health` | 서비스 상태 확인 | ❌ |
 | `GET` | `/api/usage-stats` | 사용량 통계 | ✅ |
 | `GET` | `/api/models` | 사용 가능한 모델 | ❌ |
@@ -180,7 +182,59 @@ window.location.href = 'http://localhost:3000/auth/google';
 // 성공 시 리다이렉트: http://localhost:9090/auth/success?token=JWT_TOKEN
 ```
 
-### 2. 사용자 통계 조회
+### 2. **교육용 문제 생성 (GPT-4o mini)**
+
+```javascript
+// 문제 생성 요청
+const problemData = {
+  subject: "영어",
+  grade: 3,
+  questionType: "교과 과정",
+  questionCount: 5,
+  difficulty: "어려움"
+};
+
+const response = await fetch('http://localhost:3000/api/generate-problems', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify(problemData)
+});
+
+const result = await response.json();
+console.log('생성된 문제:', result);
+
+// 응답 예시
+{
+  "success": true,
+  "message": "문제가 성공적으로 생성되었습니다.",
+  "subject": "영어",
+  "grade": 3,
+  "question_type": "교과 과정",
+  "difficulty": "어려움",
+  "question_count": 5,
+  "problems": [
+    {
+      "question": "다음 중 '사과'를 영어로 올바르게 쓴 것은?",
+      "choices": ["aple", "apple", "aplle", "appel"],
+      "answer": "apple",
+      "explanation": "사과는 영어로 'apple'입니다. 'app' + 'le'로 구성되며, 'p'가 두 개 있는 것이 특징입니다."
+    }
+  ],
+  "metadata": {
+    "model": "gpt-4o-mini",
+    "usage": {
+      "promptTokens": 250,
+      "completionTokens": 800,
+      "totalTokens": 1050
+    },
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+### 3. 사용자 통계 조회
 
 ```javascript
 const token = 'your-jwt-token';
@@ -196,7 +250,7 @@ console.log('사용자 통계:', stats);
 // 결과: { totalUsers: 10, providerStats: { google: 10 }, supportedProviders: ['google'] }
 ```
 
-### 3. 문제지 생성 (UUID 반환)
+### 4. 문제지 생성 (UUID 반환)
 
 ```javascript
 const token = 'your-jwt-token';
@@ -226,7 +280,7 @@ console.log('문제지 생성:', result);
 // result.data.id = "a0b1c2d3-e4f5-6789-abcd-ef0123456789" (UUID)
 ```
 
-### 4. GPT 문제 생성 (UUID 사용)
+### 5. GPT 문제 생성 (UUID 사용)
 
 ```javascript
 const questionSetId = 'a0b1c2d3-e4f5-6789-abcd-ef0123456789'; // UUID
@@ -252,7 +306,7 @@ const status = await statusResponse.json();
 console.log('생성 상태:', status);
 ```
 
-### 5. AI 채팅
+### 6. AI 채팅
 
 ```javascript
 const chatData = {
